@@ -33,7 +33,7 @@ To enable Prowlarr with this role, add the following configuration to your `vars
 ```yaml
 ########################################################################
 #                                                                      #
-# prowlarr                                                               #
+# prowlarr                                                             #
 #                                                                      #
 ########################################################################
 
@@ -41,7 +41,7 @@ prowlarr_enabled: true
 
 ########################################################################
 #                                                                      #
-# /prowlarr                                                              #
+# /prowlarr                                                            #
 #                                                                      #
 ########################################################################
 ```
@@ -58,6 +58,18 @@ After adjusting the hostname, make sure to adjust your DNS records to point the 
 
 >[!NOTE]
 > The `prowlarr_path_prefix` variable can be adjusted to host under a subpath (e.g. `prowlarr_path_prefix: /prowlarr`), but this hasn't been tested yet.
+
+### Configuring HTTP Basic authentication (optional)
+
+To put HTTP Basic authentication on Traefik in front of Prowlarr, add the following configuration to your `vars.yml` file. Refer to [this page](https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/basicauth/) on the Traefik's documentation for details.
+
+```yaml
+prowlarr_container_labels_traefik_middleware_basic_auth_enabled: true
+
+prowlarr_container_labels_traefik_middleware_basic_auth_users: 'USERNAME_HERE:HASHED_PASSWORD_HERE'
+```
+
+Make sure to replace `USERNAME_HERE` and `HASHED_PASSWORD_HERE` with your own values. You can create users by running `htpasswd -nb USERNAME_HERE PASSWORD_HERE`.
 
 ### Mounting additional data directories (optional)
 
@@ -108,7 +120,7 @@ Refer to [this page](https://wiki.servarr.com/prowlarr/environment-variables) fo
 
 ### Notes on configuration
 
-A freshly installed Prowlarr has no authentication of its own, and this role does not add any. Prowlarr also serves its API key to unauthenticated callers on `/initialize.json`, and that key is enough to drive the whole API. It is recommended to turn authentication on under *Settings -> General -> Security* in Prowlarr itself, or put a middleware in front of it through `prowlarr_container_labels_additional_labels`, before making an installation reachable from the internet.
+A freshly installed Prowlarr has no authentication of its own, and this role does not add any. Prowlarr also serves its API key to unauthenticated callers on `/initialize.json`, and that key is enough to drive the whole API. It is recommended to turn authentication on under *Settings -> General -> Security* in Prowlarr itself, or to [enable HTTP Basic authentication](#configuring-http-basic-authentication-optional) on Traefik, before making an installation reachable from the internet.
 
 ## Installing
 

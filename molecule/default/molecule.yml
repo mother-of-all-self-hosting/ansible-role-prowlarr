@@ -49,9 +49,7 @@ provisioner:
         prowlarr_molecule_extra_volume_dst: /molecule-extra
         prowlarr_molecule_extra_volume_marker: only-a-real-bind-mount-can-read-this
 
-        # Files placed on the host under the paths the role bind-mounts. Prowlarr
-        # itself is asked to list them back, so a mount that docker accepted but
-        # the process cannot see does not pass.
+        # The name of the marker file prepare.yml places in that directory.
         prowlarr_molecule_marker_filename: prowlarr-molecule-marker.txt
 
         # Nothing about Prowlarr's own defaults can produce these. Prowlarr's
@@ -90,6 +88,13 @@ provisioner:
             options: readonly
 
         prowlarr_container_labels_traefik_enabled: true
+
+        # Off by default, so it has to be switched on here for the basic-auth
+        # middleware in templates/labels.j2 to be exercised at all. Molecule
+        # interpolates dollar signs in this file, so the ones in the hash are
+        # written doubled.
+        prowlarr_container_labels_traefik_middleware_basic_auth_enabled: true
+        prowlarr_container_labels_traefik_middleware_basic_auth_users: "molecule:$$apr1$$molecule$$71DtE3xj/6PCMkh0SmxZ61"
 
         # Neither the role's default of Etc/UTC nor the test host's zone, so
         # that the timezone the container ends up in can only have come from

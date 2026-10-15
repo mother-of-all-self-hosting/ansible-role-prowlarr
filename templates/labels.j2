@@ -1,5 +1,5 @@
 {#
-SPDX-FileCopyrightText: 2025 spatterIight
+SPDX-FileCopyrightText: 2025 spatterlight
 
 SPDX-License-Identifier: AGPL-3.0-or-later
 #}
@@ -12,6 +12,11 @@ traefik.docker.network={{ prowlarr_container_labels_traefik_docker_network }}
 {% endif %}
 
 {% set middlewares = [] %}
+
+{% if prowlarr_container_labels_traefik_middleware_basic_auth_enabled %}
+{% set middlewares = middlewares + [prowlarr_identifier + '-basic-auth'] %}
+traefik.http.middlewares.{{ prowlarr_identifier }}-basic-auth.basicauth.users={{ prowlarr_container_labels_traefik_middleware_basic_auth_users }}
+{% endif %}
 
 {% if prowlarr_container_labels_traefik_path_prefix != '/' %}
 traefik.http.middlewares.{{ prowlarr_identifier }}-slashless-redirect.redirectregex.regex=^({{ prowlarr_container_labels_traefik_path_prefix | quote }})$

@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Version bumps of Prowlarr stay human-reviewed pull requests: a patch bump of this tag is a Prowlarr patch release, and Prowlarr applies forward-only SQLite migrations on startup whose `Down()` throws, which a fresh-install Molecule run structurally cannot see. What Molecule does gate is that the image the role pins boots, listens where the role told it to, and carries the pinned version.",
+  "description": "Version bumps of Prowlarr stay human-reviewed pull requests: a patch bump of this tag is a Prowlarr patch release, and Prowlarr applies forward-only SQLite migrations on startup whose `Down()` throws, which a fresh-install Molecule run structurally cannot see. What Molecule does gate is that the image the role pins boots, listens where the role told it to, and reports the pinned version back through its own API.",
   "extends": [
     "github>mother-of-all-self-hosting/renovate-config#v1.1.0"
   ],

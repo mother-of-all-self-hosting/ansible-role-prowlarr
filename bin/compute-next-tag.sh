@@ -67,10 +67,10 @@ fi
 
 previous_tag="${tag_prefix}${last_release}"
 
-# This is also what keeps the two branches this repository maintains from
-# releasing the same state twice: when `develop` is merged into `main`, the
-# merge commit carries the tree that was already tagged on `develop`, so there
-# is nothing here to release.
+# This is also what keeps the same state from being released twice: the
+# autotag workflow only runs on `main` by itself, but it can be dispatched by
+# hand on `develop`, and when a `develop` that was tagged that way is merged
+# into `main`, the merge commit carries a tree that was already released.
 if git diff --quiet "$previous_tag" HEAD -- "${role_defining_paths[@]}"; then
 	echo >&2 "Nothing affecting the role has changed since $previous_tag"
 	exit 0

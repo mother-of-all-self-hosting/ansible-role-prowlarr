@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2023 Slavi Pantaleev
-# SPDX-FileCopyrightText: 2025 spatterIight
+# SPDX-FileCopyrightText: 2025 spatterlight
 # SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
 #
 # SPDX-License-Identifier: AGPL-3.0-or-later
@@ -28,11 +28,12 @@
     - name: Fail if required Prowlarr Traefik settings not defined
       ansible.builtin.fail:
         msg: >-
-          You need to define a required configuration setting (`{{ item }}`).
-      when: "lookup('vars', item, default='') | string | length == 0"
+          You need to define a required configuration setting (`{{ item.name }}`).
+      when: "item.when | bool and lookup('vars', item.name, default='') | string | length == 0"
       with_items:
-        - prowlarr_container_labels_traefik_hostname
-        - prowlarr_container_labels_traefik_path_prefix
+        - { "name": "prowlarr_container_labels_traefik_hostname", when: true }
+        - { "name": "prowlarr_container_labels_traefik_path_prefix", when: true }
+        - { "name": "prowlarr_container_labels_traefik_middleware_basic_auth_users", when: "{{ prowlarr_container_labels_traefik_middleware_basic_auth_enabled }}" }
 
     # We ensure it doesn't end with a slash, because we handle both (slash and no-slash).
     # Knowing that `prowlarr_container_labels_traefik_path_prefix` does not end with a slash

@@ -11,10 +11,8 @@
   gather_facts: false
 
   vars:
-    # These are
-    # role defaults, but Jinja-derived ones, and a verify play cannot resolve
-    # those out of defaults/main.yml - so they are spelled out here.
-    prowlarr_verify_base_path: /prowlarr
+    # This is a role default, but a Jinja-derived one, and a verify play cannot
+    # resolve it out of defaults/main.yml - so it is spelled out here.
     prowlarr_verify_data_path: /prowlarr/data
 
     prowlarr_verify_url: "http://127.0.0.1:19696"
@@ -47,6 +45,7 @@
     prowlarr_expected_gid: 1873
     prowlarr_expected_hostname: prowlarr.molecule.local
     prowlarr_expected_path_prefix: /prowlarr-ui
+    prowlarr_expected_basic_auth_users: "molecule:$apr1$molecule$71DtE3xj/6PCMkh0SmxZ61"
     prowlarr_expected_timezone: Asia/Tokyo
     prowlarr_expected_timezone_abbreviation: JST
 
@@ -57,8 +56,8 @@
     - name: Verify that Prowlarr works
       block:
         # The role is not included in this playbook, so its defaults are not in
-        # scope. Reading defaults/main.yml directly ties the version assertion
-        # below.
+        # scope. Reading defaults/main.yml directly ties the version assertions
+        # below to the version the role really pins.
         - name: Load the role defaults
           ansible.builtin.include_vars:
             file: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/defaults/main.yml"
@@ -149,7 +148,7 @@
           retries: 36
           delay: 5
           # So that giving up is reported by the assertion below rather than as a
-          # wall of systemd unit properties.
+          # raw HTTP error.
           failed_when: false
 
         # `/ping` is Prowlarr's own health check and it opens the SQLite database to
@@ -303,6 +302,16 @@
             fail_msg: "The Traefik labels are not what templates/labels.j2 should have produced: {{ prowlarr_container.Config.Labels }}"
             success_msg: "The Traefik labels route {{ prowlarr_expected_hostname }}{{ prowlarr_expected_path_prefix }} to port 19696"
 
+        # Defining the middleware is not enough: Traefik only applies the ones the
+        # router lists, so the router has to carry it too.
+        - name: Assert that the basic-auth middleware is defined and attached to the Prowlarr router
+          ansible.builtin.assert:
+            that:
+              - prowlarr_container.Config.Labels['traefik.http.middlewares.prowlarr-basic-auth.basicauth.users'] == prowlarr_expected_basic_auth_users
+              - "'prowlarr-basic-auth' in prowlarr_container.Config.Labels['traefik.http.routers.prowlarr.middlewares'].split(',')"
+            fail_msg: "The basic-auth middleware is missing or not attached to the router: {{ prowlarr_container.Config.Labels }}"
+            success_msg: "The basic-auth middleware is defined and attached to the Prowlarr router"
+
         # ------------------------------------------------------------------
         # What the process inside the container actually sees
         # ------------------------------------------------------------------
@@ -363,6 +372,15 @@
               Prowlarr answered the role's API key, calls itself {{ prowlarr_molecule_instance_name }}
               and reports database migration {{ prowlarr_status.json.migrationVersion }}
 
+        # The image label above only says what the image was built from. The
+        # process itself reports its own four-component version, which has to
+        # start with the pin and a dot for the same reason as above.
+        - name: Assert the running Prowlarr reports the version this role installs
+          ansible.builtin.assert:
+            that: prowlarr_status.json.version.startswith(prowlarr_defaults.prowlarr_version ~ '.')
+            fail_msg: "Prowlarr reports version {{ prowlarr_status.json.version | default('none') }}, expected {{ prowlarr_defaults.prowlarr_version }}"
+            success_msg: "Prowlarr reports version {{ prowlarr_status.json.version }}"
+
         # ------------------------------------------------------------------
         # A round trip through the API and out the other side of the database
         # ------------------------------------------------------------------
@@ -388,7 +406,7 @@
           register: prowlarr_tags
           changed_when: false
 
-        - name: Assert the Prowlarr API returns the tag that was created and nothing else
+        - name: Assert the Prowlarr API returns the tag that was created
           ansible.builtin.assert:
             that:
               - prowlarr_verify_tag_label in prowlarr_tag_labels
@@ -427,7 +445,7 @@
             prowlarr_database_labels: "{{ prowlarr_database_tags.stdout | from_json }}"
 
         # ------------------------------------------------------------------
-        # # The negative control, which was started at the top of this play.
+        # The negative control, which was started at the top of this play.
         # ------------------------------------------------------------------
 
         - name: Wait for the stock Prowlarr control container to come up

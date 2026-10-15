@@ -51,7 +51,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6.0.3
+        uses: actions/checkout@v7.0.0
         with:
           path: prowlarr
 
@@ -67,7 +67,7 @@ jobs:
         run: pip install -r molecule/requirements.txt
 
       - name: Cache Ansible collections
-        uses: actions/cache@v5.1.0
+        uses: actions/cache@v6.1.0
         with:
           path: ~/.ansible/collections
           key: ansible-collections-${{ hashFiles('prowlarr/molecule/*/requirements.yml') }}

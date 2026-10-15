@@ -168,8 +168,9 @@ scenario 'Reverting to an already released version, with a change'
 merge "$bump_patch" > /dev/null
 expect 'a revert' v2.6.5-1 "$(merge "$revert_patch && $edit_task")"
 
-# This repository keeps a `develop` branch that gets merged into `main`, and the
-# autotag workflow runs on both. The merge into `main` carries the tree that was
+# This repository keeps a `develop` branch that gets merged into `main`. The
+# autotag workflow only runs on `main` by itself, but it can be dispatched by
+# hand on `develop`. The merge into `main` then carries the tree that was
 # already released from `develop`, so it must not be released a second time.
 scenario 'A release on develop, then the merge of develop into main'
 git branch -q develop
