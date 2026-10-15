@@ -1,0 +1,65 @@
+{#
+SPDX-FileCopyrightText: 2025 spatterlight
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+{% if prowlarr_container_labels_traefik_enabled %}
+traefik.enable=true
+
+{% if prowlarr_container_labels_traefik_docker_network %}
+traefik.docker.network={{ prowlarr_container_labels_traefik_docker_network }}
+{% endif %}
+
+{% set middlewares = [] %}
+
+{% if prowlarr_container_labels_traefik_middleware_basic_auth_enabled %}
+{% set middlewares = middlewares + [prowlarr_identifier + '-basic-auth'] %}
+traefik.http.middlewares.{{ prowlarr_identifier }}-basic-auth.basicauth.users={{ prowlarr_container_labels_traefik_middleware_basic_auth_users }}
+{% endif %}
+
+{% if prowlarr_container_labels_traefik_path_prefix != '/' %}
+traefik.http.middlewares.{{ prowlarr_identifier }}-slashless-redirect.redirectregex.regex=^({{ prowlarr_container_labels_traefik_path_prefix | quote }})$
+traefik.http.middlewares.{{ prowlarr_identifier }}-slashless-redirect.redirectregex.replacement=${1}/
+{% set middlewares = middlewares + [prowlarr_identifier + '-slashless-redirect'] %}
+{% endif %}
+
+{#
+  Intentionally not adding a stripPrefix middleware.
+  Prowlarr serves itself under the prefix via PROWLARR__SERVER__URLBASE (see `env.j2`).
+#}
+
+{% if prowlarr_container_labels_traefik_additional_request_headers.keys() | length > 0 %}
+{% for name, value in prowlarr_container_labels_traefik_additional_request_headers.items() %}
+traefik.http.middlewares.{{ prowlarr_identifier }}-add-request-headers.headers.customrequestheaders.{{ name }}={{ value }}
+{% endfor %}
+{% set middlewares = middlewares + [prowlarr_identifier + '-add-request-headers'] %}
+{% endif %}
+
+{% if prowlarr_container_labels_traefik_additional_response_headers.keys() | length > 0 %}
+{% for name, value in prowlarr_container_labels_traefik_additional_response_headers.items() %}
+traefik.http.middlewares.{{ prowlarr_identifier }}-add-response-headers.headers.customresponseheaders.{{ name }}={{ value }}
+{% endfor %}
+{% set middlewares = middlewares + [prowlarr_identifier + '-add-response-headers'] %}
+{% endif %}
+
+traefik.http.routers.{{ prowlarr_identifier }}.rule={{ prowlarr_container_labels_traefik_rule }}
+{% if prowlarr_container_labels_traefik_priority | int > 0 %}
+traefik.http.routers.{{ prowlarr_identifier }}.priority={{ prowlarr_container_labels_traefik_priority }}
+{% endif %}
+traefik.http.routers.{{ prowlarr_identifier }}.service={{ prowlarr_identifier }}
+{% if middlewares | length > 0 %}
+traefik.http.routers.{{ prowlarr_identifier }}.middlewares={{ middlewares | join(',') }}
+{% endif %}
+traefik.http.routers.{{ prowlarr_identifier }}.entrypoints={{ prowlarr_container_labels_traefik_entrypoints }}
+traefik.http.routers.{{ prowlarr_identifier }}.tls={{ prowlarr_container_labels_traefik_tls | to_json }}
+{% if prowlarr_container_labels_traefik_tls %}
+traefik.http.routers.{{ prowlarr_identifier }}.tls.certResolver={{ prowlarr_container_labels_traefik_tls_certResolver }}
+{% endif %}
+
+traefik.http.services.{{ prowlarr_identifier }}.loadbalancer.server.port={{ prowlarr_container_http_port }}
+{% endif %}
+
+{% for arg in prowlarr_container_labels_additional_labels %}
+{{ arg }}
+{% endfor %}

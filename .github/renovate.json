@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Version bumps of Prowlarr stay human-reviewed pull requests: a patch bump of this tag is a Prowlarr patch release, and Prowlarr applies forward-only SQLite migrations on startup whose `Down()` throws, which a fresh-install Molecule run structurally cannot see. What Molecule does gate is that the image the role pins boots, listens where the role told it to, and reports the pinned version back through its own API.",
+  "extends": [
+    "github>mother-of-all-self-hosting/renovate-config#v1.1.0"
+  ],
+  "packageRules": [
+    {
+      "description": "linuxserver/prowlarr publishes 15601 tags, of which only the 132 bare `<major>.<minor>.<patch>` ones are release tags; the rest are `nightly-`/`develop-`/`version-`/`amd64-`/`arm32v7-`/`arm64v8-` flavours, four-component `<version>-ls<rebuild>` builds and `<major>.<minor>.<patch>-nightly`/`-develop`/`-main` ones. Some early release tags carry Prowlarr's build number as the patch (`1.8.1259`), but none of them sorts above the 2.x line. The `versioning=semver` on the annotation already keeps the flavours out, so this is belt-and-braces: it keeps them out even if that annotation is ever changed to `docker` or `loose` versioning.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "ghcr.io/linuxserver/prowlarr"
+      ],
+      "allowedVersions": "/^\\d+\\.\\d+\\.\\d+$/"
+    }
+  ]
+}

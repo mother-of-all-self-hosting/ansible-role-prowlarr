@@ -1,0 +1,111 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+# SPDX-FileCopyrightText: 2026 Suguru Hirahara
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+    force: true
+driver:
+  name: docker
+platforms:
+  - name: prowlarr-${MOLECULE_DISTRO:-ubuntu2604}-default
+    image: "geerlingguy/docker-${MOLECULE_DISTRO:-ubuntu2604}-ansible:latest"
+    command: ${MOLECULE_DOCKER_COMMAND:-""}
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      # Docker inside the instance stores images via containerd. Its storage
+      # cannot use overlay on top of the instance's own overlay filesystem, so a
+      # volume puts it on a real filesystem.
+      - /var/lib/containerd
+    # Remove volumes along with the instance, so that local runs do not leave
+    # gigabytes behind.
+    keep_volumes: false
+    cgroupns_mode: host
+    privileged: true
+    pre_build_image: true
+provisioner:
+  name: ansible
+  config_options:
+    defaults:
+      callback_result_format: yaml
+  inventory:
+    group_vars:
+      all:
+        # Helper variables
+        prowlarr_debug_service_enabled: false
+        prowlarr_restarts_check_enabled: true
+
+        # The host directory mounted into the container through
+        # `prowlarr_container_additional_volumes_custom`, and the file placed in it by
+        # prepare.yml. Reading that file from inside the container is what
+        # proves the additional volumes reach the systemd unit rather than
+        # being merely declared in defaults/main.yml.
+        prowlarr_molecule_extra_volume_src: /prowlarr-molecule-extra
+        prowlarr_molecule_extra_volume_dst: /molecule-extra
+        prowlarr_molecule_extra_volume_marker: only-a-real-bind-mount-can-read-this
+
+        # The name of the marker file prepare.yml places in that directory.
+        prowlarr_molecule_marker_filename: prowlarr-molecule-marker.txt
+
+        # Nothing about Prowlarr's own defaults can produce these. Prowlarr's
+        # built-in port is 9696, it calls itself "Prowlarr" and it generates a
+        # random API key on first start, so every one of them turning up as
+        # this file spells it is attributable to the role and to nothing else.
+        # See molecule/default/verify.yml.
+        prowlarr_molecule_api_key: a1b2c3d4e5f60718293a4b5c6d7e8f90
+        prowlarr_molecule_instance_name: MoleculeProwlarrInstance
+
+        # Variables for Prowlarr
+        #
+        # Deliberately not 1000: the linuxserver.io PUID/PGID pattern has left a
+        # needed directory unwritable in other roles of this fleet, and a uid
+        # that exists in the test image by accident would hide that.
+        prowlarr_uid: 1873
+        prowlarr_gid: 1873
+
+        prowlarr_hostname: prowlarr.molecule.local
+
+        # A non-root path prefix exercises the URL base (templates/env.j2) and
+        # the slashless redirect (templates/labels.j2).
+        prowlarr_path_prefix: /prowlarr-ui
+
+        # Bound to the loopback interface of the test container only. Nothing
+        # is published to the machine running Molecule, so two scenarios can
+        # run side by side without fighting over a port.
+        prowlarr_container_http_host_bind_port: "127.0.0.1:19696"
+
+        prowlarr_container_http_port: 19696
+
+        prowlarr_container_additional_volumes_custom:
+          - type: bind
+            src: "{{ prowlarr_molecule_extra_volume_src }}"
+            dst: "{{ prowlarr_molecule_extra_volume_dst }}"
+            options: readonly
+
+        prowlarr_container_labels_traefik_enabled: true
+
+        # Off by default, so it has to be switched on here for the basic-auth
+        # middleware in templates/labels.j2 to be exercised at all. Molecule
+        # interpolates dollar signs in this file, so the ones in the hash are
+        # written doubled.
+        prowlarr_container_labels_traefik_middleware_basic_auth_enabled: true
+        prowlarr_container_labels_traefik_middleware_basic_auth_users: "molecule:$$apr1$$molecule$$71DtE3xj/6PCMkh0SmxZ61"
+
+        # Neither the role's default of Etc/UTC nor the test host's zone, so
+        # that the timezone the container ends up in can only have come from
+        # templates/env.j2.
+        prowlarr_environment_variables_tz: Asia/Tokyo
+
+        prowlarr_environment_variables_additional_variables: |
+          PROWLARR__AUTH__APIKEY={{ prowlarr_molecule_api_key }}
+          PROWLARR__APP__INSTANCENAME={{ prowlarr_molecule_instance_name }}
+  env:
+    # Workaround for https://github.com/ansible/molecule/issues/4391
+    ANSIBLE_ROLES_PATH: ${MOLECULE_PROJECT_DIRECTORY}/..:/.ansible/roles:/usr/share/ansible/roles:/etc/ansible/roles:~/.ansible/roles
+verifier:
+  name: ansible

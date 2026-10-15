@@ -1,0 +1,620 @@
+# SPDX-FileCopyrightText: 2026 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2026 spatterlight
+# SPDX-FileCopyrightText: 2026 Suguru Hirahara
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Verify Prowlarr
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars:
+    # This is a role default, but a Jinja-derived one, and a verify play cannot
+    # resolve it out of defaults/main.yml - so it is spelled out here.
+    prowlarr_verify_data_path: /prowlarr/data
+
+    # Prowlarr serves itself under the configured path prefix.
+    prowlarr_verify_url: "http://127.0.0.1:19696/prowlarr-ui"
+    prowlarr_verify_api_url: "http://127.0.0.1:19696/prowlarr-ui/api/v1"
+    prowlarr_verify_headers:
+      X-Api-Key: "{{ prowlarr_molecule_api_key }}"
+
+    # The name carries both the role and the scenario, like the platform does,
+    # so a leftover container can never be mistaken for another scenario's.
+    prowlarr_verify_control_container: "{{ inventory_hostname }}-stock-control"
+
+    # A path Prowlarr has no route for. Its single-page app answers 200 on it
+    # anyway, which is the whole reason none of the assertions below gate on a
+    # status code alone.
+    prowlarr_verify_nonexistent_path: /molecule-no-such-path
+
+    # The tag the round trip creates. Distinctive enough that finding it in
+    # Prowlarr's database cannot be a coincidence.
+    prowlarr_verify_tag_label: molecule-round-trip-tag
+
+    # Nobody ever creates this one. Asking for it proves the read-back is a
+    # search that discriminates, rather than a call returning whatever exists.
+    prowlarr_verify_absent_tag_label: molecule-never-created-tag
+
+    # The unusual values the scenario configures the role with. Written down
+    # here rather than read back out of the inventory, so that a verify run
+    # compares the running container against something stated, not against
+    # whatever the scenario happens to say at the time.
+    prowlarr_expected_uid: 1873
+    prowlarr_expected_gid: 1873
+    prowlarr_expected_hostname: prowlarr.molecule.local
+    prowlarr_expected_path_prefix: /prowlarr-ui
+    prowlarr_expected_basic_auth_users: "molecule:$apr1$molecule$71DtE3xj/6PCMkh0SmxZ61"
+    prowlarr_expected_timezone: Asia/Tokyo
+    prowlarr_expected_timezone_abbreviation: JST
+
+    prowlarr_verify_units:
+      - prowlarr.service
+
+  tasks:
+    - name: Verify that Prowlarr works
+      block:
+        # The role is not included in this playbook, so its defaults are not in
+        # scope. Reading defaults/main.yml directly ties the version assertions
+        # below to the version the role really pins.
+        - name: Load the role defaults
+          ansible.builtin.include_vars:
+            file: "{{ lookup('env', 'MOLECULE_PROJECT_DIRECTORY') }}/defaults/main.yml"
+            name: prowlarr_defaults
+
+        # ------------------------------------------------------------------
+        # The negative control, started first so that it boots alongside the
+        # assertions below rather than after them
+        # ------------------------------------------------------------------
+
+        - name: Inspect Prowlarr container
+          ansible.builtin.command:
+            cmd: docker container inspect prowlarr
+          register: prowlarr_container_raw
+          changed_when: false
+
+        - name: Parse the Prowlarr container definition
+          ansible.builtin.set_fact:
+            prowlarr_container: "{{ (prowlarr_container_raw.stdout | from_json)[0] }}"
+
+        # The same image, with none of the role's configuration. Anything this one
+        # can do unaided is worthless as evidence about the role, and it can do more
+        # than one would hope: it serves HTTP 200 on `/`, on `/login` and on every
+        # path that does not exist, answers `/ping` with `{"status": "OK"}`, and
+        # hands its API key to anyone who asks for `/initialize.json`. An HTTP probe
+        # that only looks for a 200 therefore proves nothing at all, which is why
+        # every assertion below is about a value this container cannot produce.
+        - name: Remove any leftover stock Prowlarr control container
+          ansible.builtin.command:
+            cmd: "docker rm -f {{ prowlarr_verify_control_container }}"
+          changed_when: false
+          failed_when: false
+
+        - name: Run the Prowlarr image with none of the role's configuration
+          ansible.builtin.command:
+            cmd: >-
+              docker run -d --rm
+              --name {{ prowlarr_verify_control_container }}
+              {{ prowlarr_container.Config.Image }}
+          changed_when: true
+
+        # ------------------------------------------------------------------
+        # The systemd unit
+        # ------------------------------------------------------------------
+
+        - name: Wait for the Prowlarr systemd services to become active (up to 180s each)
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+          register: prowlarr_services
+          until: prowlarr_services.status.ActiveState == 'active'
+          retries: 36
+          delay: 5
+          loop: "{{ prowlarr_verify_units }}"
+          # So that giving up is reported by the assertion below rather than as a
+          # wall of systemd unit properties.
+          failed_when: false
+
+        # `Restart=always` in the systemd unit means that even a container which crashes
+        # and gets restarted reads as active here, so this is a precondition rather than
+        # a result.
+        - name: Assert the Prowlarr systemd services are active
+          ansible.builtin.assert:
+            that: prowlarr_services.results | map(attribute='status.ActiveState') | unique | list == ['active']
+            fail_msg: >-
+              Not every service is active:
+              {{ dict(prowlarr_verify_units | zip(prowlarr_services.results | map(attribute='status.ActiveState'))) }}
+            success_msg: "Every systemd service is active"
+
+        - name: Retrieve the Prowlarr systemd services log for debugging
+          when: prowlarr_debug_service_enabled | bool
+          ansible.builtin.command:
+            cmd: "journalctl --no-pager --output=cat --unit={{ item }}"
+          changed_when: false
+          loop: "{{ prowlarr_verify_units }}"
+
+        # A published Docker port with nothing listening behind it resets the
+        # connection rather than refusing it, which `uri` reports as status -1, and
+        # Prowlarr needs a while to migrate its database before it serves anything.
+        # The loop has to survive both, so failures are tolerated here and judged
+        # after.
+        - name: Wait for Prowlarr to report itself healthy (up to 180s)
+          ansible.builtin.uri:
+            url: "{{ prowlarr_verify_url }}/ping"
+            method: GET
+            follow_redirects: none
+          register: prowlarr_health
+          until: prowlarr_health.status == 200 and (prowlarr_health.json | default({})).get('status', '') == 'OK'
+          retries: 36
+          delay: 5
+          # So that giving up is reported by the assertion below rather than as a
+          # raw HTTP error.
+          failed_when: false
+
+        # `/ping` is Prowlarr's own health check and it opens the SQLite database to
+        # answer, so unlike the single-page app it cannot answer while Prowlarr is
+        # broken.
+        - name: Assert Prowlarr reports itself healthy
+          ansible.builtin.assert:
+            that: (prowlarr_health.json | default({})).get('status', '') == 'OK'
+            fail_msg: "Prowlarr did not report itself healthy: {{ prowlarr_health.status | default('no response') }}"
+            success_msg: "Prowlarr reports itself healthy"
+
+        # ------------------------------------------------------------------
+        # What `docker create` was actually told
+        # ------------------------------------------------------------------
+
+        - name: Collect the mounts the role asked for
+          ansible.builtin.set_fact:
+            prowlarr_extra_mount: "{{ prowlarr_container.Mounts | selectattr('Destination', 'equalto', prowlarr_molecule_extra_volume_dst) | list }}"
+
+        # prowlarr_container_additional_volumes_custom has been inert in several roles in
+        # this collection - rendered into a comment, or into a `-v` that silently
+        # dropped the options. Both the destination and the readonly option have
+        # to arrive.
+        - name: Assert that prowlarr_container_additional_volumes_custom reached the container
+          ansible.builtin.assert:
+            that:
+              - prowlarr_extra_mount | length == 1
+              - prowlarr_extra_mount[0].Type == 'bind'
+              - prowlarr_extra_mount[0].Source == prowlarr_molecule_extra_volume_src
+              - not prowlarr_extra_mount[0].RW
+            fail_msg: "The additional volume did not reach the container: {{ prowlarr_container.Mounts }}"
+            success_msg: "The additional volume is mounted read-only at {{ prowlarr_molecule_extra_volume_dst }}"
+
+        # Reading the file back from inside the
+        # container is the difference between the variable existing and it working.
+        - name: Read the marker through the additional volume
+          ansible.builtin.command:
+            cmd: >-
+              docker exec prowlarr
+              cat {{ prowlarr_molecule_extra_volume_dst }}/{{ prowlarr_molecule_marker_filename }}
+          register: prowlarr_extra_volume
+          changed_when: false
+
+        - name: Assert the additional volume is mounted into the Prowlarr container
+          ansible.builtin.assert:
+            that:
+              - prowlarr_extra_volume.rc == 0
+              - prowlarr_extra_volume.stdout | trim == prowlarr_molecule_extra_volume_marker
+            fail_msg: "The additional volume did not carry the marker into the container"
+            success_msg: "The additional volume carries the marker into the container"
+
+        # The `docker create` line in templates/systemd/prowlarr.service.j2 has a
+        # comment sitting in the middle of a backslash continuation, right in front
+        # of the tmpfs that linuxserver.io's read-only mode needs. systemd drops
+        # such a comment rather than passing it on to docker, but that is worth
+        # holding onto: if it ever stopped doing so, everything after the comment
+        # would silently become part of the image name.
+        - name: Assert that the read-only container still gets its writable /run
+          ansible.builtin.assert:
+            that:
+              - prowlarr_container.HostConfig.ReadonlyRootfs
+              - "'/run' in (prowlarr_container.HostConfig.Tmpfs | default({}))"
+              - "'exec' in prowlarr_container.HostConfig.Tmpfs['/run']"
+            fail_msg: >-
+              The container's root filesystem is
+              {{ 'read-only' if prowlarr_container.HostConfig.ReadonlyRootfs else 'writable' }}
+              and its tmpfs mounts are {{ prowlarr_container.HostConfig.Tmpfs | default({}) }}
+            success_msg: "The container is read-only with an exec tmpfs at /run"
+
+        - name: Assert that the role's uid and gid reached the container
+          ansible.builtin.assert:
+            that:
+              - prowlarr_container.Config.User == (prowlarr_expected_uid | string) ~ ':' ~ (prowlarr_expected_gid | string)
+              - ('PUID=' ~ prowlarr_expected_uid) in prowlarr_container.Config.Env
+              - ('PGID=' ~ prowlarr_expected_gid) in prowlarr_container.Config.Env
+            fail_msg: >-
+              The container runs as {{ prowlarr_container.Config.User }}
+              with {{ prowlarr_container.Config.Env | select('match', 'P[UG]ID=') | list }}
+            success_msg: "The container runs as {{ prowlarr_container.Config.User }} and carries the matching PUID/PGID"
+
+        - name: Assert that the role's timezone reached the container environment
+          ansible.builtin.assert:
+            that:
+              - ('TZ=' ~ prowlarr_expected_timezone) in prowlarr_container.Config.Env
+            fail_msg: "templates/env.j2 did not put TZ={{ prowlarr_expected_timezone }} on the container"
+            success_msg: "The container environment carries TZ={{ prowlarr_expected_timezone }}"
+
+        - name: Assert that the container image is the pinned version
+          ansible.builtin.assert:
+            that:
+              - prowlarr_container.Config.Image == 'ghcr.io/linuxserver/prowlarr:' ~ prowlarr_defaults.prowlarr_version
+            fail_msg: >-
+              The container runs {{ prowlarr_container.Config.Image }}, not the
+              {{ prowlarr_defaults.prowlarr_version }} pinned in defaults/main.yml
+            success_msg: "The container runs {{ prowlarr_container.Config.Image }}"
+
+        # linuxserver.io stamps its own build onto the image as
+        # `<Prowlarr version>-ls<rebuild counter>`.
+        #
+        # `prowlarr_version` pins a three-component linuxserver.io tag (`2.6.5`) while
+        # Prowlarr's own version has four components (`2.6.5.5623`) and the image
+        # label carries the rebuild counter on top (`2.6.5.5623-ls163`), so the pin
+        # is compared as a prefix - with the trailing dot, so that `2.6.5` cannot be
+        # satisfied by a `2.6.50` build.
+        - name: Assert the running Prowlarr is the version this role installs
+          ansible.builtin.assert:
+            that: prowlarr_container.Config.Labels['org.opencontainers.image.version'].startswith(prowlarr_defaults.prowlarr_version ~ '.')
+            fail_msg: "Prowlarr reports {{ prowlarr_container.Config.Labels['org.opencontainers.image.version'] | default('none') }}, expected {{ prowlarr_defaults.prowlarr_version }}"
+            success_msg: "Prowlarr reports {{ prowlarr_container.Config.Labels['org.opencontainers.image.version'] }}"
+
+        # Prowlarr keeps its port in the config.xml it maintains for itself under
+        # `prowlarr_data_path`, which this role does not template. Only the
+        # `PROWLARR__SERVER__PORT` the role renders into the env file can move it, so
+        # a Prowlarr listening anywhere other than 9696 is the role's doing. The
+        # absence of 9696 matters as much as the presence of the configured port:
+        # were the override dropped, the published port and the Traefik label would
+        # still say 19696 while the process sat on 9696.
+        - name: Read the ports Prowlarr listens on
+          ansible.builtin.command:
+            cmd: docker exec prowlarr netstat -lnt
+          register: prowlarr_listening_raw
+          changed_when: false
+
+        - name: Make sense of the ports Prowlarr listens on
+          ansible.builtin.set_fact:
+            prowlarr_listening_ports: "{{ prowlarr_listening_raw.stdout | regex_findall(':([0-9]+)\\s') | unique }}"
+
+        - name: Assert Prowlarr listens on the port the role configured and not on its own default
+          ansible.builtin.assert:
+            that:
+              - prowlarr_container_http_port | string in prowlarr_listening_ports
+              - "'9696' not in prowlarr_listening_ports"
+            fail_msg: >-
+              Prowlarr listens on {{ prowlarr_listening_ports | join(', ') }}, not on the configured
+              19696, so prowlarr_container_http_port does not reach the process
+            success_msg: >-
+              Prowlarr listens on 19696 and not on its built-in 9696,
+              so prowlarr_container_http_port reaches the process
+
+        # ------------------------------------------------------------------
+        # Traefik labels
+        # ------------------------------------------------------------------
+
+        - name: Assert that the Traefik labels describe the configured hostname and path prefix
+          ansible.builtin.assert:
+            that:
+              - prowlarr_container.Config.Labels['traefik.enable'] == 'true'
+              - prowlarr_container.Config.Labels['traefik.http.routers.prowlarr.rule'] == 'Host(`' ~ prowlarr_expected_hostname ~ '`) && PathPrefix(`' ~ prowlarr_expected_path_prefix ~ '`)'
+              - "'traefik.http.middlewares.prowlarr-strip-prefix.stripprefix.prefixes' not in prowlarr_container.Config.Labels"
+              - prowlarr_container.Config.Labels['traefik.http.services.prowlarr.loadbalancer.server.port'] == '19696'
+            fail_msg: "The Traefik labels are not what templates/labels.j2 should have produced: {{ prowlarr_container.Config.Labels }}"
+            success_msg: "The Traefik labels route {{ prowlarr_expected_hostname }}{{ prowlarr_expected_path_prefix }} to port 19696"
+
+        # Prowlarr's web UI builds every asset and API URL from these, so they must
+        # carry the prefix Traefik routes on.
+        - name: Read the URL base Prowlarr hands to its web UI
+          ansible.builtin.uri:
+            url: "{{ prowlarr_verify_url }}/initialize.json"
+            method: GET
+            return_content: true
+            follow_redirects: none
+          register: prowlarr_initialize
+          changed_when: false
+
+        - name: Assert that Prowlarr serves itself under the configured path prefix
+          ansible.builtin.assert:
+            that:
+              - prowlarr_initialize_json.urlBase == prowlarr_expected_path_prefix
+              - prowlarr_initialize_json.apiRoot == prowlarr_expected_path_prefix ~ '/api/v1'
+            fail_msg: >-
+              Prowlarr hands its web UI the URL base {{ prowlarr_initialize_json.urlBase | default('none') }}
+              and the API root {{ prowlarr_initialize_json.apiRoot | default('none') }},
+              not ones under {{ prowlarr_expected_path_prefix }}
+            success_msg: "Prowlarr serves its web UI and API under {{ prowlarr_expected_path_prefix }}"
+          vars:
+            prowlarr_initialize_json: "{{ prowlarr_initialize.content | from_json }}"
+
+        # Defining the middleware is not enough: Traefik only applies the ones the
+        # router lists, so the router has to carry it too.
+        - name: Assert that the basic-auth middleware is defined and attached to the Prowlarr router
+          ansible.builtin.assert:
+            that:
+              - prowlarr_container.Config.Labels['traefik.http.middlewares.prowlarr-basic-auth.basicauth.users'] == prowlarr_expected_basic_auth_users
+              - "'prowlarr-basic-auth' in prowlarr_container.Config.Labels['traefik.http.routers.prowlarr.middlewares'].split(',')"
+            fail_msg: "The basic-auth middleware is missing or not attached to the router: {{ prowlarr_container.Config.Labels }}"
+            success_msg: "The basic-auth middleware is defined and attached to the Prowlarr router"
+
+        # ------------------------------------------------------------------
+        # What the process inside the container actually sees
+        # ------------------------------------------------------------------
+
+        - name: Ask the Prowlarr container which timezone and user it is running in
+          ansible.builtin.command:
+            cmd: docker exec prowlarr sh -c 'date +%Z; id -u; id -g'
+          register: prowlarr_process_identity
+          changed_when: false
+
+        - name: Assert that the Prowlarr process runs in the role's timezone, as the role's user
+          ansible.builtin.assert:
+            that:
+              - prowlarr_process_identity.stdout_lines[0] == prowlarr_expected_timezone_abbreviation
+              - prowlarr_process_identity.stdout_lines[1] == prowlarr_expected_uid | string
+              - prowlarr_process_identity.stdout_lines[2] == prowlarr_expected_gid | string
+            fail_msg: >-
+              The container reports zone/uid/gid {{ prowlarr_process_identity.stdout_lines }},
+              expected [{{ prowlarr_expected_timezone_abbreviation }},
+              {{ prowlarr_expected_uid }}, {{ prowlarr_expected_gid }}]
+            success_msg: >-
+              The Prowlarr process runs in {{ prowlarr_process_identity.stdout_lines[0] }}
+              as {{ prowlarr_process_identity.stdout_lines[1] }}:{{ prowlarr_process_identity.stdout_lines[2] }}
+
+        # ------------------------------------------------------------------
+        # Verify environment variables reach Prowlarr
+        # ------------------------------------------------------------------
+
+        - name: Read the Prowlarr system status
+          ansible.builtin.uri:
+            url: "{{ prowlarr_verify_api_url }}/system/status"
+            method: GET
+            headers: "{{ prowlarr_verify_headers }}"
+            follow_redirects: none
+          register: prowlarr_status
+          changed_when: false
+
+        # The API key and the instance name both come from
+        # `prowlarr_environment_variables_additional_variables`. Prowlarr generates a
+        # random API key on first start and calls itself "Prowlarr", so a status
+        # response that answered to the role's key and carries the role's instance
+        # name cannot have come from an unconfigured Prowlarr. `migrationVersion` and
+        # `appData` come out of the SQLite database Prowlarr keeps under the path the
+        # role bind-mounts, so this response is not a static page either.
+        - name: Assert the additional environment variables reached Prowlarr
+          ansible.builtin.assert:
+            that:
+              - prowlarr_status.status == 200
+              - prowlarr_status.json.instanceName == prowlarr_molecule_instance_name
+              - prowlarr_status.json.databaseType == 'sqLite'
+              - prowlarr_status.json.migrationVersion | int > 0
+              - prowlarr_status.json.appData == '/config'
+            fail_msg: >-
+              Prowlarr calls itself {{ prowlarr_status.json.instanceName | default('none') }} rather than
+              {{ prowlarr_molecule_instance_name }}, so prowlarr_environment_variables_additional_variables
+              does not reach the process
+            success_msg: >-
+              Prowlarr answered the role's API key, calls itself {{ prowlarr_molecule_instance_name }}
+              and reports database migration {{ prowlarr_status.json.migrationVersion }}
+
+        # The image label above only says what the image was built from. The
+        # process itself reports its own four-component version, which has to
+        # start with the pin and a dot for the same reason as above.
+        - name: Assert the running Prowlarr reports the version this role installs
+          ansible.builtin.assert:
+            that: prowlarr_status.json.version.startswith(prowlarr_defaults.prowlarr_version ~ '.')
+            fail_msg: "Prowlarr reports version {{ prowlarr_status.json.version | default('none') }}, expected {{ prowlarr_defaults.prowlarr_version }}"
+            success_msg: "Prowlarr reports version {{ prowlarr_status.json.version }}"
+
+        # ------------------------------------------------------------------
+        # A round trip through the API and out the other side of the database
+        # ------------------------------------------------------------------
+
+        - name: Create a tag through the Prowlarr API
+          ansible.builtin.uri:
+            url: "{{ prowlarr_verify_api_url }}/tag"
+            method: POST
+            headers: "{{ prowlarr_verify_headers }}"
+            body_format: json
+            body:
+              label: "{{ prowlarr_verify_tag_label }}"
+            status_code: [201]
+            follow_redirects: none
+          changed_when: true
+
+        - name: Read the tags back through the Prowlarr API
+          ansible.builtin.uri:
+            url: "{{ prowlarr_verify_api_url }}/tag"
+            method: GET
+            headers: "{{ prowlarr_verify_headers }}"
+            follow_redirects: none
+          register: prowlarr_tags
+          changed_when: false
+
+        - name: Assert the Prowlarr API returns the tag that was created
+          ansible.builtin.assert:
+            that:
+              - prowlarr_verify_tag_label in prowlarr_tag_labels
+              - prowlarr_verify_absent_tag_label not in prowlarr_tag_labels
+            fail_msg: "The Prowlarr API returned {{ prowlarr_tag_labels | join(', ') }}"
+            success_msg: "The Prowlarr API returned the tag that was created"
+          vars:
+            prowlarr_tag_labels: "{{ prowlarr_tags.json | map(attribute='label') | list }}"
+
+        # The API could be answering out of memory. Prowlarr keeps its state in a
+        # SQLite database in the directory the role bind-mounts, so the row has to
+        # be there too, on the host side of the mount.
+        - name: Read the tags out of the Prowlarr database
+          ansible.builtin.command:
+            argv:
+              - python3
+              - -c
+              - |
+                import json, sqlite3, sys
+                connection = sqlite3.connect(sys.argv[1])
+                print(json.dumps([row[0] for row in connection.execute('SELECT "Label" FROM "Tags"')]))
+              - "{{ prowlarr_verify_data_path }}/prowlarr.db"
+          register: prowlarr_database_tags
+          changed_when: false
+
+        - name: Assert the tag reached the Prowlarr database under the role's data path
+          ansible.builtin.assert:
+            that:
+              - prowlarr_verify_tag_label in prowlarr_database_labels
+              - prowlarr_verify_absent_tag_label not in prowlarr_database_labels
+            fail_msg: "{{ prowlarr_verify_data_path }}/prowlarr.db holds {{ prowlarr_database_labels | join(', ') }}"
+            success_msg: >-
+              {{ prowlarr_verify_data_path }}/prowlarr.db holds the tag the API created,
+              so Prowlarr's state lives where the role put it
+          vars:
+            prowlarr_database_labels: "{{ prowlarr_database_tags.stdout | from_json }}"
+
+        # ------------------------------------------------------------------
+        # The negative control, which was started at the top of this play.
+        # ------------------------------------------------------------------
+
+        - name: Wait for the stock Prowlarr control container to come up
+          ansible.builtin.command:
+            cmd: >-
+              docker exec {{ prowlarr_verify_control_container }}
+              wget --quiet --output-document=- http://127.0.0.1:9696/initialize.json
+          register: prowlarr_control_initialize
+          until: prowlarr_control_initialize.rc == 0
+          retries: 60
+          delay: 5
+          changed_when: false
+          failed_when: false
+
+        - name: Ask the stock Prowlarr control container for a path that does not exist
+          ansible.builtin.command:
+            cmd: >-
+              docker exec {{ prowlarr_verify_control_container }}
+              wget --quiet --output-document=- http://127.0.0.1:9696{{ prowlarr_verify_nonexistent_path }}
+          register: prowlarr_control_nonexistent
+          changed_when: false
+          failed_when: false
+
+        - name: Assert the stock Prowlarr image serves a different instance entirely
+          ansible.builtin.assert:
+            that:
+              # It comes up unaided, so "it responds" is not evidence about the role.
+              - prowlarr_control_initialize.rc == 0
+              # And it answers 200 even for a path Prowlarr has no route for, which is
+              # what makes a bare `GET /` worthless as a probe.
+              - prowlarr_control_nonexistent.rc == 0
+              # It is a plain, unauthenticated Prowlarr: it hands out its own API key.
+              - prowlarr_control_json.apiKey | length > 0
+              # And that key is not the role's, so the status response above was
+              # answered by a Prowlarr the role configured.
+              - prowlarr_control_json.apiKey != prowlarr_molecule_api_key
+              - prowlarr_control_json.instanceName == 'Prowlarr'
+            fail_msg: >-
+              The stock Prowlarr image produced {{ prowlarr_control_initialize.stdout | default('none') }},
+              which makes the assertions above unattributable to the role
+            success_msg: >-
+              The stock Prowlarr image answers 200 on any path, serves its own random API key
+              and calls itself "Prowlarr", so the configured instance above is the role's doing
+          vars:
+            prowlarr_control_json: "{{ prowlarr_control_initialize.stdout | from_json }}"
+
+        - name: Offer the role's API key to the stock Prowlarr control container
+          ansible.builtin.command:
+            cmd: >-
+              docker exec {{ prowlarr_verify_control_container }}
+              wget --quiet --output-document=- --header=X-Api-Key:{{ prowlarr_molecule_api_key }}
+              http://127.0.0.1:9696/api/v1/system/status
+          register: prowlarr_control_status
+          changed_when: false
+          failed_when: false
+
+        - name: Read the ports the stock Prowlarr control container listens on
+          ansible.builtin.command:
+            cmd: "docker exec {{ prowlarr_verify_control_container }} netstat -lnt"
+          register: prowlarr_control_listening
+          changed_when: false
+
+        - name: Assert the stock Prowlarr image has neither the role's key nor the role's port
+          ansible.builtin.assert:
+            that:
+              - prowlarr_control_status.rc != 0
+              - "'9696' in prowlarr_control_ports"
+              - prowlarr_container_http_port | string not in prowlarr_control_ports
+            fail_msg: >-
+              The stock Prowlarr image accepted the role's API key or listens on
+              19696 ({{ prowlarr_control_ports | join(', ') }}),
+              so neither is evidence that the role configured anything
+            success_msg: >-
+              The stock Prowlarr image rejects the role's API key and listens on its built-in 9696,
+              so both are the role's doing
+          vars:
+            prowlarr_control_ports: "{{ prowlarr_control_listening.stdout | regex_findall(':([0-9]+)\\s') | unique }}"
+
+        - name: Ensure the Prowlarr negative control container is removed
+          ansible.builtin.command:
+            cmd: "docker rm -f {{ prowlarr_verify_control_container }}"
+          changed_when: true
+
+        - name: Verify nothing was quietly restarting while all of that was being checked
+          when: "prowlarr_restarts_check_enabled | bool"
+          block:
+            # `Restart=always` means the unit reads `active` while it is crash-looping,
+            # so `active` on its own says very little. The window has to be watched with
+            # everything already answering.
+            - name: Sample the restart counters
+              ansible.builtin.systemd_service:
+                name: "{{ item }}"
+              register: prowlarr_restarts_before
+              loop: "{{ prowlarr_verify_units }}"
+
+            # Comfortably longer than the unit's `RestartSec=30`, so a crash loop has to
+            # tick at least once inside the window.
+            - name: Watch the services for 45 seconds
+              ansible.builtin.pause:
+                seconds: 45
+
+            - name: Sample the restart counters again
+              ansible.builtin.systemd_service:
+                name: "{{ item }}"
+              register: prowlarr_restarts_after
+              loop: "{{ prowlarr_verify_units }}"
+
+            - name: Assert no service restarted while it was up
+              ansible.builtin.assert:
+                that:
+                  - prowlarr_restarts_after.results | map(attribute='status.NRestarts') | list == prowlarr_restarts_before.results | map(attribute='status.NRestarts') | list
+                  - prowlarr_restarts_after.results | map(attribute='status.ActiveState') | unique | list == ['active']
+                fail_msg: >-
+                  A service restarted while it was supposedly up, so `active` was hiding a crash loop.
+                  Before:
+                  {% for unit, restarts in prowlarr_verify_units | zip(prowlarr_restarts_before.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %},
+                  after:
+                  {% for unit, restarts in prowlarr_verify_units | zip(prowlarr_restarts_after.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %}
+                success_msg: >-
+                  None of the services restarted over 45 seconds of watching (restarts so far:
+                  {% for unit, restarts in prowlarr_verify_units | zip(prowlarr_restarts_after.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %})
+
+        - name: Show the Prowlarr verification summary
+          ansible.builtin.debug:
+            msg:
+              - "Prowlarr systemd: {% for unit, state in prowlarr_verify_units | zip(prowlarr_services.results | map(attribute='status.ActiveState')) %}{{ unit }} ({{ state }}){% if not loop.last %}, {% endif %}{% endfor %}"
+              - "Prowlarr restarts: {% for unit, restarts in prowlarr_verify_units | zip(prowlarr_restarts_after.results | map(attribute='status.NRestarts')) %}{{ restarts }} ({{ unit }}){% if not loop.last %}, {% endif %}{% endfor %}"
+              - "Prowlarr version: {{ prowlarr_status.json.version }}"
+              - "Prowlarr listening on: {{ prowlarr_listening_ports | join(', ') }} (configured: {{ prowlarr_container_http_port }})"
+              - "Prowlarr instance name: {{ prowlarr_status.json.instanceName }}"
+              - "Prowlarr database: {{ prowlarr_status.json.databaseType }} at migration {{ prowlarr_status.json.migrationVersion }}, under {{ prowlarr_verify_data_path }}"
+
+      rescue:
+        # Whatever went wrong, the reason is almost always in the systemd service log.
+        - name: Retrieve the Prowlarr systemd service log
+          ansible.builtin.command:
+            cmd: journalctl --no-pager --output=cat --unit=prowlarr.service
+          register: prowlarr_service_log
+          changed_when: false
+
+        - name: Show the Prowlarr systemd service log
+          ansible.builtin.debug:
+            var: prowlarr_service_log.stdout_lines
+
+        - name: Fail because verification did not pass
+          ansible.builtin.fail:
+            msg: "Prowlarr verification failed. The systemd service log is printed above."
