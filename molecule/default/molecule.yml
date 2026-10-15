@@ -70,8 +70,8 @@ provisioner:
 
         prowlarr_hostname: prowlarr.molecule.local
 
-        # A non-root path prefix exercises the strip-prefix and slashless
-        # redirect middlewares in templates/labels.j2.
+        # A non-root path prefix exercises the URL base (templates/env.j2) and
+        # the slashless redirect (templates/labels.j2).
         prowlarr_path_prefix: /prowlarr-ui
 
         # Bound to the loopback interface of the test container only. Nothing

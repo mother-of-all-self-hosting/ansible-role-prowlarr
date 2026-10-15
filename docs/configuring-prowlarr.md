@@ -57,7 +57,7 @@ prowlarr_hostname: "example.com"
 After adjusting the hostname, make sure to adjust your DNS records to point the domain to your server.
 
 >[!NOTE]
-> The `prowlarr_path_prefix` variable can be adjusted to host under a subpath (e.g. `prowlarr_path_prefix: /prowlarr`), but this hasn't been tested yet.
+> The `prowlarr_path_prefix` variable can be adjusted to host under a subpath (e.g. `prowlarr_path_prefix: /prowlarr`).
 
 ### Configuring HTTP Basic authentication (optional)
 

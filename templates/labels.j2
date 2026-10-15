@@ -24,10 +24,10 @@ traefik.http.middlewares.{{ prowlarr_identifier }}-slashless-redirect.redirectre
 {% set middlewares = middlewares + [prowlarr_identifier + '-slashless-redirect'] %}
 {% endif %}
 
-{% if prowlarr_container_labels_traefik_path_prefix != '/' %}
-traefik.http.middlewares.{{ prowlarr_identifier }}-strip-prefix.stripprefix.prefixes={{ prowlarr_container_labels_traefik_path_prefix }}
-{% set middlewares = middlewares + [prowlarr_identifier + '-strip-prefix'] %}
-{% endif %}
+{#
+  Intentionally not adding a stripPrefix middleware.
+  Prowlarr serves itself under the prefix via PROWLARR__SERVER__URLBASE (see `env.j2`).
+#}
 
 {% if prowlarr_container_labels_traefik_additional_request_headers.keys() | length > 0 %}
 {% for name, value in prowlarr_container_labels_traefik_additional_request_headers.items() %}

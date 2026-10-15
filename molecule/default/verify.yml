@@ -15,8 +15,9 @@
     # resolve it out of defaults/main.yml - so it is spelled out here.
     prowlarr_verify_data_path: /prowlarr/data
 
-    prowlarr_verify_url: "http://127.0.0.1:19696"
-    prowlarr_verify_api_url: "http://127.0.0.1:19696/api/v1"
+    # Prowlarr serves itself under the configured path prefix.
+    prowlarr_verify_url: "http://127.0.0.1:19696/prowlarr-ui"
+    prowlarr_verify_api_url: "http://127.0.0.1:19696/prowlarr-ui/api/v1"
     prowlarr_verify_headers:
       X-Api-Key: "{{ prowlarr_molecule_api_key }}"
 
@@ -297,10 +298,34 @@
             that:
               - prowlarr_container.Config.Labels['traefik.enable'] == 'true'
               - prowlarr_container.Config.Labels['traefik.http.routers.prowlarr.rule'] == 'Host(`' ~ prowlarr_expected_hostname ~ '`) && PathPrefix(`' ~ prowlarr_expected_path_prefix ~ '`)'
-              - prowlarr_container.Config.Labels['traefik.http.middlewares.prowlarr-strip-prefix.stripprefix.prefixes'] == prowlarr_expected_path_prefix
+              - "'traefik.http.middlewares.prowlarr-strip-prefix.stripprefix.prefixes' not in prowlarr_container.Config.Labels"
               - prowlarr_container.Config.Labels['traefik.http.services.prowlarr.loadbalancer.server.port'] == '19696'
             fail_msg: "The Traefik labels are not what templates/labels.j2 should have produced: {{ prowlarr_container.Config.Labels }}"
             success_msg: "The Traefik labels route {{ prowlarr_expected_hostname }}{{ prowlarr_expected_path_prefix }} to port 19696"
+
+        # Prowlarr's web UI builds every asset and API URL from these, so they must
+        # carry the prefix Traefik routes on.
+        - name: Read the URL base Prowlarr hands to its web UI
+          ansible.builtin.uri:
+            url: "{{ prowlarr_verify_url }}/initialize.json"
+            method: GET
+            return_content: true
+            follow_redirects: none
+          register: prowlarr_initialize
+          changed_when: false
+
+        - name: Assert that Prowlarr serves itself under the configured path prefix
+          ansible.builtin.assert:
+            that:
+              - prowlarr_initialize_json.urlBase == prowlarr_expected_path_prefix
+              - prowlarr_initialize_json.apiRoot == prowlarr_expected_path_prefix ~ '/api/v1'
+            fail_msg: >-
+              Prowlarr hands its web UI the URL base {{ prowlarr_initialize_json.urlBase | default('none') }}
+              and the API root {{ prowlarr_initialize_json.apiRoot | default('none') }},
+              not ones under {{ prowlarr_expected_path_prefix }}
+            success_msg: "Prowlarr serves its web UI and API under {{ prowlarr_expected_path_prefix }}"
+          vars:
+            prowlarr_initialize_json: "{{ prowlarr_initialize.content | from_json }}"
 
         # Defining the middleware is not enough: Traefik only applies the ones the
         # router lists, so the router has to carry it too.
