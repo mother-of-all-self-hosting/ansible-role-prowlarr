@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+# SPDX-FileCopyrightText: 2025 spatterIight
+# SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+---
+- name: Perform Prowlarr installation tasks
+  when: prowlarr_enabled | bool
+  tags:
+    - setup-all
+    - setup-prowlarr
+    - install-all
+    - install-prowlarr
+  block:
+    - name: Validate Prowlarr configuration
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/validate_config.yml"
+    - name: Install Prowlarr
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/install.yml"
+
+- name: Perform Prowlarr uninstallation tasks
+  when: not prowlarr_enabled | bool
+  tags:
+    - setup-all
+    - setup-prowlarr
+  block:
+    - name: Uninstall Prowlarr
+      ansible.builtin.include_tasks: "{{ role_path }}/tasks/uninstall.yml"

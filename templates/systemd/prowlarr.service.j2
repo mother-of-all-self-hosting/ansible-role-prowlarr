@@ -1,0 +1,71 @@
+{#
+SPDX-FileCopyrightText: 2023 Slavi Pantaleev
+SPDX-FileCopyrightText: 2024 Nikita Chernyi
+SPDX-FileCopyrightText: 2025 spatterIight
+SPDX-FileCopyrightText: 2025, 2026 Suguru Hirahara
+
+SPDX-License-Identifier: AGPL-3.0-or-later
+#}
+
+[Unit]
+Description=Prowlarr ({{ prowlarr_identifier }})
+{% for service in prowlarr_systemd_required_services_list %}
+Requires={{ service }}
+After={{ service }}
+{% endfor %}
+{% for service in prowlarr_systemd_wanted_services_list %}
+Wants={{ service }}
+{% endfor %}
+
+[Service]
+Type=simple
+Environment="HOME={{ devture_systemd_docker_base_systemd_unit_home_path }}"
+ExecStartPre={{ devture_systemd_docker_base_host_command_sh }} -c '{{ prowlarr_container_cleanup_command | trim | replace("\n", " ") }}'
+
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} create \
+      --rm \
+      --name={{ prowlarr_identifier }} \
+      --log-driver=none \
+      --user={{ prowlarr_uid }}:{{ prowlarr_gid }} \
+      --cap-drop=ALL \
+      --cap-add=CHOWN \
+      --cap-add=DAC_OVERRIDE \
+      --cap-add=FOWNER \
+      --cap-add=SETGID \
+      --cap-add=SETUID \
+      --read-only \
+      --network={{ prowlarr_container_network }} \
+      {% if prowlarr_container_http_host_bind_port %}
+      -p {{ prowlarr_container_http_host_bind_port }}:{{ prowlarr_container_http_port }} \
+      {% endif %}
+      --env-file={{ prowlarr_base_path }}/env \
+      --label-file={{ prowlarr_base_path }}/labels \
+      --mount type=bind,src={{ prowlarr_data_path }},dst=/config \
+      {% for volume in prowlarr_container_additional_volumes %}
+      --mount type={{ volume.type | default('bind' if '/' in volume.src else 'volume') }},src={{ volume.src }},dst={{ volume.dst }}{{ (',' + volume.options) if volume.options | default('') else '' }} \
+      {% endfor %}
+      # https://docs.linuxserver.io/misc/read-only/#how
+      --tmpfs=/run:rw,exec,nosuid,size={{ prowlarr_container_tmpfs_run_size }} \
+      {% for arg in prowlarr_container_extra_arguments %}
+      {{ arg }} \
+      {% endfor %}
+      {{ prowlarr_container_image }} \
+      {% for arg in prowlarr_process_extra_arguments %}
+      {{ arg }} \
+      {% endfor %}
+
+{% for network in prowlarr_container_additional_networks %}
+ExecStartPre={{ devture_systemd_docker_base_host_command_docker }} network connect {{ network }} {{ prowlarr_identifier }}
+{% endfor %}
+
+ExecStart={{ devture_systemd_docker_base_host_command_docker }} start --attach {{ prowlarr_identifier }}
+
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} stop -t {{ prowlarr_container_stop_grace_time_seconds }} {{ prowlarr_identifier }} 2>/dev/null || true'
+ExecStop=-{{ devture_systemd_docker_base_host_command_sh }} -c '{{ devture_systemd_docker_base_host_command_docker }} rm {{ prowlarr_identifier }} 2>/dev/null || true'
+
+Restart=always
+RestartSec=30
+SyslogIdentifier={{ prowlarr_identifier }}
+
+[Install]
+WantedBy=multi-user.target
