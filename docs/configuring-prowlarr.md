@@ -82,9 +82,11 @@ prowlarr_container_additional_volumes_custom:
     dst: /downloads
 ```
 
-### Configuring trusted networks
+### Configuring trusted networks (optional)
 
 Prowlarr only trusts forwarded headers from loopback addresses by default. For Traefik to pass the original client address and HTTPS scheme to Prowlarr, it is necessary to configure **Trusted Networks** with the proxy's address or network. Refer to [Prowlarr's security settings](https://wiki.servarr.com/prowlarr/settings#security) for details.
+
+This is required if you set **Authentication Required** to *Disabled for Local Addresses*: without it, every request arriving through Traefik comes from the proxy's private address, so Prowlarr treats all of them as local and skips authentication. If authentication is required for all addresses, it is only needed for Prowlarr to see and log the actual client addresses.
 
 First, inspect the Docker network shared by Traefik and Prowlarr on the server:
 
