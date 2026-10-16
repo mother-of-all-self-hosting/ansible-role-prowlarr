@@ -47,14 +47,13 @@ prowlarr_container_network_deletion_enabled: true
 # Takes an "<ip>:<port>" or "<port>" value (e.g. "127.0.0.1:2586"), or empty string to not expose.
 prowlarr_container_http_host_bind_port: ""
 
-# A port number in the container
+# The port number in the container
 prowlarr_container_http_port: 9696
 
 # A list of additional container networks that the container would be connected to.
 # The role does not create these networks, so make sure they already exist.
 # Use this to expose this container to another reverse proxy, which runs in a different container network.
-prowlarr_container_additional_networks: "{{ (prowlarr_container_additional_networks_default + prowlarr_container_additional_networks_auto + prowlarr_container_additional_networks_custom) | unique }}"
-prowlarr_container_additional_networks_default: []
+prowlarr_container_additional_networks: "{{ prowlarr_container_additional_networks_auto + prowlarr_container_additional_networks_custom }}"
 prowlarr_container_additional_networks_auto: []
 prowlarr_container_additional_networks_custom: []
 
@@ -80,7 +79,7 @@ prowlarr_container_labels_traefik_rule: "Host(`{{ prowlarr_container_labels_trae
 prowlarr_container_labels_traefik_priority: 0
 prowlarr_container_labels_traefik_entrypoints: web-secure
 prowlarr_container_labels_traefik_tls: "{{ prowlarr_container_labels_traefik_entrypoints != 'web' }}"
-prowlarr_container_labels_traefik_tls_certResolver: default # noqa var-naming
+prowlarr_container_labels_traefik_tls_certResolver: default  # noqa var-naming
 prowlarr_container_labels_traefik_middleware_basic_auth_enabled: false
 # See: https://doc.traefik.io/traefik/reference/routing-configuration/http/middlewares/basicauth/
 prowlarr_container_labels_traefik_middleware_basic_auth_users: ""
@@ -179,13 +178,13 @@ prowlarr_floc_optout_enabled: true
 prowlarr_hsts_preload_enabled: false
 
 # List of systemd services that the Prowlarr systemd service depends on
-prowlarr_systemd_required_services_list: "{{ (prowlarr_systemd_required_services_list_default + prowlarr_systemd_required_services_list_auto + prowlarr_systemd_required_services_list_custom) | unique }}"
+prowlarr_systemd_required_services_list: "{{ prowlarr_systemd_required_services_list_default + prowlarr_systemd_required_services_list_auto + prowlarr_systemd_required_services_list_custom }}"
 prowlarr_systemd_required_services_list_default: "{{ [devture_systemd_docker_base_docker_service_name] if devture_systemd_docker_base_docker_service_name else [] }}"
 prowlarr_systemd_required_services_list_auto: []
 prowlarr_systemd_required_services_list_custom: []
 
 # List of systemd services that the Prowlarr systemd service wants
-prowlarr_systemd_wanted_services_list: "{{ (prowlarr_systemd_wanted_services_list_default + prowlarr_systemd_wanted_services_list_auto + prowlarr_systemd_wanted_services_list_custom) | unique }}"
+prowlarr_systemd_wanted_services_list: "{{ prowlarr_systemd_wanted_services_list_default + prowlarr_systemd_wanted_services_list_auto + prowlarr_systemd_wanted_services_list_custom }}"
 prowlarr_systemd_wanted_services_list_default: []
 prowlarr_systemd_wanted_services_list_auto: []
 prowlarr_systemd_wanted_services_list_custom: []
@@ -224,12 +223,7 @@ prowlarr_container_cleanup_command: |
 # Specify the timezone
 prowlarr_environment_variables_tz: "Etc/UTC"
 
-# prowlarr_environment_variables_additional_variables contains a multiline string with additional environment variables to pass to the container.
-#
-# Example:
-# prowlarr_environment_variables_additional_variables: |
-#   VAR=1
-#   ANOTHER=value
+# Additional environment variables.
 prowlarr_environment_variables_additional_variables: ""
 
 # prowlarr_restart_necessary controls whether the Prowlarr systemd

@@ -16,7 +16,7 @@
     - "{{ prowlarr_base_path }}"
     - "{{ prowlarr_data_path }}"
 
-- name: Ensure Prowlarr support files created
+- name: Ensure Prowlarr support files installed
   ansible.builtin.template:
     src: "{{ role_path }}/templates/{{ item }}.j2"
     dest: "{{ prowlarr_base_path }}/{{ item }}"

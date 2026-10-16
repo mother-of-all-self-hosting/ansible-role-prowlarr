@@ -42,13 +42,13 @@
     # here rather than read back out of the inventory, so that a verify run
     # compares the running container against something stated, not against
     # whatever the scenario happens to say at the time.
-    prowlarr_expected_uid: 1873
-    prowlarr_expected_gid: 1873
-    prowlarr_expected_hostname: prowlarr.molecule.local
-    prowlarr_expected_path_prefix: /prowlarr-ui
-    prowlarr_expected_basic_auth_users: "molecule:$apr1$molecule$71DtE3xj/6PCMkh0SmxZ61"
-    prowlarr_expected_timezone: Asia/Tokyo
-    prowlarr_expected_timezone_abbreviation: JST
+    prowlarr_verify_uid: 1873
+    prowlarr_verify_gid: 1873
+    prowlarr_verify_hostname: prowlarr.molecule.local
+    prowlarr_verify_path_prefix: /prowlarr-ui
+    prowlarr_verify_basic_auth_users: "molecule:$apr1$molecule$71DtE3xj/6PCMkh0SmxZ61"
+    prowlarr_verify_timezone: Asia/Tokyo
+    prowlarr_verify_timezone_abbreviation: JST
 
     prowlarr_verify_units:
       - prowlarr.service
@@ -216,9 +216,9 @@
         - name: Assert that the role's uid and gid reached the container
           ansible.builtin.assert:
             that:
-              - prowlarr_container.Config.User == (prowlarr_expected_uid | string) ~ ':' ~ (prowlarr_expected_gid | string)
-              - ('PUID=' ~ prowlarr_expected_uid) in prowlarr_container.Config.Env
-              - ('PGID=' ~ prowlarr_expected_gid) in prowlarr_container.Config.Env
+              - prowlarr_container.Config.User == (prowlarr_verify_uid | string) ~ ':' ~ (prowlarr_verify_gid | string)
+              - ('PUID=' ~ prowlarr_verify_uid) in prowlarr_container.Config.Env
+              - ('PGID=' ~ prowlarr_verify_gid) in prowlarr_container.Config.Env
             fail_msg: >-
               The container runs as {{ prowlarr_container.Config.User }}
               with {{ prowlarr_container.Config.Env | select('match', 'P[UG]ID=') | list }}
@@ -227,9 +227,9 @@
         - name: Assert that the role's timezone reached the container environment
           ansible.builtin.assert:
             that:
-              - ('TZ=' ~ prowlarr_expected_timezone) in prowlarr_container.Config.Env
-            fail_msg: "templates/env.j2 did not put TZ={{ prowlarr_expected_timezone }} on the container"
-            success_msg: "The container environment carries TZ={{ prowlarr_expected_timezone }}"
+              - ('TZ=' ~ prowlarr_verify_timezone) in prowlarr_container.Config.Env
+            fail_msg: "templates/env.j2 did not put TZ={{ prowlarr_verify_timezone }} on the container"
+            success_msg: "The container environment carries TZ={{ prowlarr_verify_timezone }}"
 
         - name: Assert that the container image is the pinned version
           ansible.builtin.assert:
@@ -291,11 +291,11 @@
           ansible.builtin.assert:
             that:
               - prowlarr_container.Config.Labels['traefik.enable'] == 'true'
-              - prowlarr_container.Config.Labels['traefik.http.routers.prowlarr.rule'] == 'Host(`' ~ prowlarr_expected_hostname ~ '`) && PathPrefix(`' ~ prowlarr_expected_path_prefix ~ '`)'
+              - prowlarr_container.Config.Labels['traefik.http.routers.prowlarr.rule'] == 'Host(`' ~ prowlarr_verify_hostname ~ '`) && PathPrefix(`' ~ prowlarr_verify_path_prefix ~ '`)'
               - "'traefik.http.middlewares.prowlarr-strip-prefix.stripprefix.prefixes' not in prowlarr_container.Config.Labels"
               - prowlarr_container.Config.Labels['traefik.http.services.prowlarr.loadbalancer.server.port'] == '19696'
             fail_msg: "The Traefik labels are not what templates/labels.j2 should have produced: {{ prowlarr_container.Config.Labels }}"
-            success_msg: "The Traefik labels route {{ prowlarr_expected_hostname }}{{ prowlarr_expected_path_prefix }} to port 19696"
+            success_msg: "The Traefik labels route {{ prowlarr_verify_hostname }}{{ prowlarr_verify_path_prefix }} to port 19696"
 
         # Prowlarr's web UI builds every asset and API URL from these, so they must
         # carry the prefix Traefik routes on.
@@ -311,13 +311,13 @@
         - name: Assert that Prowlarr serves itself under the configured path prefix
           ansible.builtin.assert:
             that:
-              - prowlarr_initialize_json.urlBase == prowlarr_expected_path_prefix
-              - prowlarr_initialize_json.apiRoot == prowlarr_expected_path_prefix ~ '/api/v1'
+              - prowlarr_initialize_json.urlBase == prowlarr_verify_path_prefix
+              - prowlarr_initialize_json.apiRoot == prowlarr_verify_path_prefix ~ '/api/v1'
             fail_msg: >-
               Prowlarr hands its web UI the URL base {{ prowlarr_initialize_json.urlBase | default('none') }}
               and the API root {{ prowlarr_initialize_json.apiRoot | default('none') }},
-              not ones under {{ prowlarr_expected_path_prefix }}
-            success_msg: "Prowlarr serves its web UI and API under {{ prowlarr_expected_path_prefix }}"
+              not ones under {{ prowlarr_verify_path_prefix }}
+            success_msg: "Prowlarr serves its web UI and API under {{ prowlarr_verify_path_prefix }}"
           vars:
             prowlarr_initialize_json: "{{ prowlarr_initialize.content | from_json }}"
 
@@ -326,7 +326,7 @@
         - name: Assert that the basic-auth middleware is defined and attached to the Prowlarr router
           ansible.builtin.assert:
             that:
-              - prowlarr_container.Config.Labels['traefik.http.middlewares.prowlarr-basic-auth.basicauth.users'] == prowlarr_expected_basic_auth_users
+              - prowlarr_container.Config.Labels['traefik.http.middlewares.prowlarr-basic-auth.basicauth.users'] == prowlarr_verify_basic_auth_users
               - "'prowlarr-basic-auth' in prowlarr_container.Config.Labels['traefik.http.routers.prowlarr.middlewares'].split(',')"
             fail_msg: "The basic-auth middleware is missing or not attached to the router: {{ prowlarr_container.Config.Labels }}"
             success_msg: "The basic-auth middleware is defined and attached to the Prowlarr router"
@@ -344,13 +344,13 @@
         - name: Assert that the Prowlarr process runs in the role's timezone, as the role's user
           ansible.builtin.assert:
             that:
-              - prowlarr_process_identity.stdout_lines[0] == prowlarr_expected_timezone_abbreviation
-              - prowlarr_process_identity.stdout_lines[1] == prowlarr_expected_uid | string
-              - prowlarr_process_identity.stdout_lines[2] == prowlarr_expected_gid | string
+              - prowlarr_process_identity.stdout_lines[0] == prowlarr_verify_timezone_abbreviation
+              - prowlarr_process_identity.stdout_lines[1] == prowlarr_verify_uid | string
+              - prowlarr_process_identity.stdout_lines[2] == prowlarr_verify_gid | string
             fail_msg: >-
               The container reports zone/uid/gid {{ prowlarr_process_identity.stdout_lines }},
-              expected [{{ prowlarr_expected_timezone_abbreviation }},
-              {{ prowlarr_expected_uid }}, {{ prowlarr_expected_gid }}]
+              expected [{{ prowlarr_verify_timezone_abbreviation }},
+              {{ prowlarr_verify_uid }}, {{ prowlarr_verify_gid }}]
             success_msg: >-
               The Prowlarr process runs in {{ prowlarr_process_identity.stdout_lines[0] }}
               as {{ prowlarr_process_identity.stdout_lines[1] }}:{{ prowlarr_process_identity.stdout_lines[2] }}
