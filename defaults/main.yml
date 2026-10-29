@@ -17,7 +17,7 @@ prowlarr_base_path: "/{{ prowlarr_identifier }}"
 prowlarr_data_path: "{{ prowlarr_base_path }}/data"
 
 # renovate: datasource=docker depName=ghcr.io/linuxserver/prowlarr versioning=semver
-prowlarr_version: 2.6.5
+prowlarr_version: 2.7.0
 prowlarr_arch: amd64
 
 prowlarr_uid: ""
