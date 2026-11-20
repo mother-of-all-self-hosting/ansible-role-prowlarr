@@ -13,7 +13,6 @@
   with_items:
     - prowlarr_uid
     - prowlarr_gid
-    - prowlarr_hostname
 
 - name: Fail if Prowlarr architecture is not supported
   ansible.builtin.fail:
